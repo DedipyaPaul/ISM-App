@@ -1,5 +1,13 @@
 // Version 13: Slim Nav, Daily Digest Sub-Nav
 import { useState, useEffect, useRef } from "react";
+// Add this new block:
+import { auth, db } from "./firebase"; // Import from our new firebase.js file
+import { 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged 
+} from "firebase/auth";
 
 // --- DATA (from original document) --- //
 
@@ -121,6 +129,12 @@ const styles = {
 
 export default function App() {
     // --- STATE MANAGEMENT --- //
+    // Add this new block:
+const [user, setUser] = useState(null); // To hold the logged-in user object
+const [loading, setLoading] = useState(true); // To handle initial auth check
+const [authEmail, setAuthEmail] = useState("");
+const [authPassword, setAuthPassword] = useState("");
+const [isLoginView, setIsLoginView] = useState(true); // To toggle between login/signup
     const [activeView, setActiveView] = useState('home');
     const [mood, setMood] = useState("peaceful");
     const [faith, setFaith] = useState(() => localStorage.getItem("faith") || "General Wisdom");
@@ -149,6 +163,15 @@ export default function App() {
     const isAnyModeActive = isMeditating || isZenMode || isSacredEarthMode;
 
     // --- EFFECTS --- //
+    // Add this new block:
+useEffect(() => {
+  const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    setUser(currentUser);
+    setLoading(false);
+  });
+  // Cleanup subscription on unmount
+  return () => unsubscribe();
+}, []);
     
     // Effect to control background video play/pause state
     useEffect(() => {
@@ -230,6 +253,26 @@ export default function App() {
         window.addEventListener("click", handleFirstClick);
         return () => window.removeEventListener("click", handleFirstClick);
     }, []);
+    // --- AUTHENTICATION HANDLERS --- //
+const handleSignup = async () => {
+  try {
+    await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+  } catch (error) {
+    alert(`Signup Failed: ${error.message}`);
+  }
+};
+
+const handleLogin = async () => {
+  try {
+    await signInWithEmailAndPassword(auth, authEmail, authPassword);
+  } catch (error) {
+    alert(`Login Failed: ${error.message}`);
+  }
+};
+
+const handleLogout = () => {
+  signOut(auth);
+};
 
     const handleSubscribe = async () => {
         if (!email) {
@@ -323,185 +366,282 @@ export default function App() {
     );
 
     return (
-        <div style={{ position: "relative", minHeight: "100vh", color: "white", fontFamily: 'sans-serif', overflow: 'hidden', display: 'flex' }}>
-            
-            {/* Background Video - now covers the entire viewport */}
-            <iframe ref={moodRef} src={moodBackgrounds[mood]} title="Mood Background" allow="autoplay" frameBorder="0"
-                style={{ 
-                    position: "fixed", 
-                    top: 0, 
-                    left: 0, 
-                    width: "100vw", 
-                    height: "100vh", 
-                    zIndex: -1, 
-                    pointerEvents: 'none' 
-                }}
-            ></iframe>
+  <div style={{ position: "relative", minHeight: "100vh", color: "white", fontFamily: 'sans-serif', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    {/* Background Video - always on */}
+    <iframe ref={moodRef} src={moodBackgrounds[mood]} title="Mood Background" allow="autoplay" frameBorder="0"
+      style={{
+        position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", zIndex: -1, pointerEvents: 'none'
+      }}
+    ></iframe>
 
-            {/* Left Navigation Pane */}
-            {!isAnyModeActive && (
-                <div style={styles.leftPane}>
-                    <h1 style={{textAlign: 'center', marginTop: 0, fontSize: '1.5rem'}}>ISM App</h1>
-                    <button 
-                        onClick={() => setActiveView('home')} 
-                        style={{...styles.navButton, ...(activeView === 'home' && styles.activeNavButton)}}
-                    >
-                        🏠 Home
-                    </button>
-                    <button 
-                        onClick={() => setActiveView('digest')} 
-                        style={{...styles.navButton, ...(activeView === 'digest' && styles.activeNavButton)}}
-                    >
-                        ☀️ Daily Digest
-                    </button>
-                    <hr style={{border: '1px solid rgba(255, 255, 255, 0.1)', margin: '1rem 0'}} />
-                    <p style={{margin: '0 0 0.5rem 0', fontSize: '0.8rem', color: '#aaa'}}>MODES</p>
-                    <button 
-                        onClick={() => setIsMeditating(true)} 
-                        style={styles.navButton}
-                    >
-                        🙏 Meditation
-                    </button>
-                     <button 
-                        onClick={() => setIsZenMode(true)} 
-                        style={styles.navButton}
-                    >
-                        🧘 Zen Mode
-                    </button>
-                    <select 
-                        onChange={(e) => {
-                            if (e.target.value) {
-                                setSacredEarthTribe(e.target.value);
-                                setIsSacredEarthMode(true);
-                            }
-                        }}
-                        value="" // Always reset to the placeholder
-                        style={styles.navSelect}
-                    >
-                        <option value="" style={{background: '#333'}}>🏞️ Sacred Earth</option>
-                        <option value="DeepForestDawn" style={{background: '#333'}}>Deep Forest Dawn</option>
-                        <option value="RiverEdge" style={{background: '#333'}}>River’s Edge</option>
-                        <option value="EmeraldThunder" style={{background: '#333'}}>Emerald Thunderstorm</option>
-                        <option value="CampfireNight" style={{background: '#333'}}>Nightfall Campfire</option>
-                        <option value="MorningSerenade" style={{background: '#333'}}>Songbird Serenade</option>
-                    </select>
-                </div>
-            )}
+    {/* --- CONDITIONAL RENDERING --- */}
+    {loading ? (
+      <h2>Loading...</h2>
+    ) : !user ? (
+      // If NOT logged in, show the AuthView
+      <AuthView
+        isLoginView={isLoginView}
+        setIsLoginView={setIsLoginView}
+        authEmail={authEmail}
+        setAuthEmail={setAuthEmail}
+        authPassword={authPassword}
+        setAuthPassword={setAuthPassword}
+        handleLogin={handleLogin}
+        handleSignup={handleSignup}
+      />
+    ) : (
+      // If LOGGED IN, show the main app
+      <>
+        {/* Left Navigation Pane */}
+        {!isAnyModeActive && (
+          <div style={styles.leftPane}>
+            <h1 style={{textAlign: 'center', marginTop: 0, fontSize: '1.5rem'}}>ISM App</h1>
+            <button
+              onClick={() => setActiveView('home')}
+              style={{...styles.navButton, ...(activeView === 'home' && styles.activeNavButton)}}
+            >
+              🏠 Home
+            </button>
+            <button
+              onClick={() => setActiveView('digest')}
+              style={{...styles.navButton, ...(activeView === 'digest' && styles.activeNavButton)}}
+            >
+              ☀️ Daily Digest
+            </button>
+            <hr style={{border: '1px solid rgba(255, 255, 255, 0.1)', margin: '1rem 0'}} />
+            <p style={{margin: '0 0 0.5rem 0', fontSize: '0.8rem', color: '#aaa'}}>MODES</p>
+            <button
+              onClick={() => setIsMeditating(true)}
+              style={styles.navButton}
+            >
+              🙏 Meditation
+            </button>
+            <button
+              onClick={() => setIsZenMode(true)}
+              style={styles.navButton}
+            >
+              🧘 Zen Mode
+            </button>
+            <select
+              onChange={(e) => {
+                if (e.target.value) {
+                  setSacredEarthTribe(e.target.value);
+                  setIsSacredEarthMode(true);
+                }
+              }}
+              value="" // Always reset to the placeholder
+              style={styles.navSelect}
+            >
+              <option value="" style={{background: '#333'}}> 🏞️ Sacred Earth</option>
+              <option value="DeepForestDawn" style={{background: '#333'}}>Deep Forest Dawn</option>
+              <option value="RiverEdge" style={{background: '#333'}}>River’s Edge</option>
+              <option value="EmeraldThunder" style={{background: '#333'}}>Emerald Thunderstorm</option>
+              <option value="CampfireNight" style={{background: '#333'}}>Nightfall Campfire</option>
+              <option value="MorningSerenade" style={{background: '#333'}}>Songbird Serenade</option>
+            </select>
 
-            {/* Main Content Area */}
-            {!isAnyModeActive && (
-                <div style={styles.mainContent}>
-                    {activeView === 'home' && <HomeView />}
-                    {activeView === 'digest' && <DailyDigestView />}
-                </div>
-            )}
-            
-            {/* Full-screen modes (Meditation, Zen, Sacred Earth) */}
-            {isMeditating && (
-                <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "#000", display: "flex", zIndex: 10000 }}>
-                    <div style={{ flex: 3, display: "flex", justifyContent: "center", alignItems: "center", padding: '1rem' }}>
-                        <iframe id="meditationVideo" width="100%" height="100%" src={meditationStyles[selectedMeditationIndex].url} title={meditationStyles[selectedMeditationIndex].title} frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen></iframe>
-                    </div>
-                    <div id="meditationList" style={{ flex: 1, background: "#111", color: "#fff", padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "10px" }}>
-                        <h3>Select Meditation</h3>
-                        {meditationStyles.map((video, index) => (
-                            <button key={video.title} onClick={() => setSelectedMeditationIndex(index)} style={{ padding: "10px", background: selectedMeditationIndex === index ? "#333" : "#222", color: "#fff", border: "none", borderRadius: "6px", textAlign: "left", cursor: "pointer" }}>{video.title}</button>
-                        ))}
-                    </div>
-                    <button onClick={() => setIsMeditating(false)} style={{ position: "absolute", bottom: "20px", right: "20px", padding: "12px 24px", fontSize: "16px", background: "#fff", color: "#000", border: "none", borderRadius: "8px", cursor: "pointer", zIndex: 10001 }}> Exit Meditation </button>
-                </div>
-            )}
-            {isZenMode && (
-                <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "#111", color: "#fff", zIndex: 9999, display: "flex", flexDirection: window.innerWidth < 768 ? "column" : "row", overflowY: "auto" }}>
-                    <div style={{ position: "absolute", top: "10px", width: "100%", textAlign: "center", fontSize: "18px", opacity: promptFade ? 1 : 0, transition: "opacity 0.5s", color: "#ccc", zIndex: 10000 }}>{zenPrompts[promptIndex]}</div>
-                    <div style={{ width: window.innerWidth < 768 ? '100%' : "30%", background: "#1a1a1a", padding: "20px", overflowY: "auto", borderRight: "1px solid #333" }}>
-                        <h2 style={{ marginTop: 0 }}> 📘 Journal History</h2>
-                        {Object.entries(allJournals).sort(([a], [b]) => b.localeCompare(a)).map(([date, entry]) => {
-                            const isGrateful = gratefulEntries[date]?.trim() === entry.trim();
-                            return (
-                                <div key={date} onClick={() => setJournalDate(date)} style={{ padding: "10px", marginBottom: "10px", background: journalDate === date ? "#333" : "#222", borderRadius: "5px", cursor: "pointer" }}>
-                                    <strong>{new Date(date).toDateString()}</strong>
-                                    <p style={{ fontSize: "12px", color: "#ccc" }}>{entry.slice(0, 60)}{entry.length > 60 ? "..." : ""}</p>
-                                    <button onClick={(e) => {
-                                        e.stopPropagation();
-                                        let current = JSON.parse(localStorage.getItem("gratefulMemories") || "[]");
-                                        const index = current.findIndex(m => m.date === date && m.content === entry);
-                                        if (index !== -1) {
-                                            current.splice(index, 1);
-                                            alert("❌ Removed from Grateful Memories");
-                                        } else {
-                                            current.push({ date, content: entry });
-                                            alert("⭐ Marked as Grateful Memory!");
-                                        }
-                                        localStorage.setItem("gratefulMemories", JSON.stringify(current));
-                                        const updated = {};
-                                        current.forEach(m => { updated[m.date] = m.content; });
-                                        setGratefulEntries(updated);
-                                    }}> {isGrateful ? "❌ Unmark Grateful" : "💖 Mark as Grateful"} </button>
-                                </div>
-                            );
-                        })}
-                    </div>
-                    <div style={{ flex: 1, padding: "30px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start" }}>
-                        <h1> 🧘 Zen Mode</h1>
-                        <input type="date" value={journalDate} onChange={(e) => setJournalDate(e.target.value)} style={{ marginBottom: "20px", fontSize: "16px", padding: "6px", borderRadius: "4px", border: "1px solid #666", background: "#222", color: "#fff" }} />
-                        <iframe width="0" height="0" src="https://www.youtube.com/embed/EK7tN-LVgxo?autoplay=1&loop=1&playlist=EK7tN-LVgxo" title="Zen Music" allow="autoplay" style={{ display: "none" }}></iframe>
-                        <button onClick={() => setViewingGrateful(!viewingGrateful)} style={{ marginBottom: "16px", padding: "10px 16px", background: viewingGrateful ? "#ffe0b2" : "#dcedc8", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold", fontSize: "15px" }}>
-                            {viewingGrateful ? "← Back to Journal" : "💖 View Grateful Memories"}
-                        </button>
-                        {viewingGrateful ? (
-                            <div style={{ background: "#fff8e1", padding: "20px", borderRadius: "10px", color: "#333", fontSize: "16px", height: "60vh", overflowY: "auto", width: '100%' }}>
-                                <h3 style={{ color: "#c62828", marginBottom: "10px" }}> 💖 Your Grateful Memories</h3>
-                                {Object.keys(gratefulEntries).length === 0 ? (<p>No grateful memories saved yet.</p>) : (Object.entries(gratefulEntries).filter(([_, text]) => text && text.trim()).map(([date, text]) => (
-                                    <div key={date} style={{ background: "#fff", marginBottom: "10px", padding: "10px", borderRadius: "6px", boxShadow: "0 2px 4px rgba(0,0,0,0.1)" }}>
-                                        <strong>{date}</strong>
-                                        <p style={{ margin: "5px 0" }}>{text}</p>
-                                    </div>
-                                )))}
-                                <button onClick={() => {
-                                    const content = Object.entries(gratefulEntries).filter(([_, text]) => text && text.trim()).map(([date, text]) => `${date}\n${text}\n\n`).join("");
-                                    const blob = new Blob([content], { type: "text/plain" });
-                                    const url = URL.createObjectURL(blob);
-                                    const link = document.createElement("a");
-                                    link.href = url;
-                                    link.download = "Grateful_Memories.txt";
-                                    link.click();
-                                    URL.revokeObjectURL(url);
-                                }} style={{ marginTop: "10px", padding: "10px 16px", background: "#aed581", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}> 📥 Download as .txt </button>
-                            </div>
-                        ) : (
-                            <>
-                                <textarea placeholder="Let your thoughts flow here..." value={journalText} onChange={(e) => setJournalText(e.target.value)}
-                                    style={{ width: "100%", height: "60vh", padding: "20px", fontSize: "16px", background: "#222", color: "#fff", border: "none", borderRadius: "8px", resize: "none" }}
-                                />
-                                <button onClick={() => {
-                                    if (!journalText || !journalText.trim()) {
-                                        alert("Cannot mark an empty entry as grateful.");
-                                        return;
-                                    }
-                                    let current = JSON.parse(localStorage.getItem("gratefulMemories") || "[]");
-                                    const index = current.findIndex(m => m.date === journalDate);
-                                    if (index !== -1) {
-                                        current[index].content = journalText;
-                                    } else {
-                                        current.push({ date: journalDate, content: journalText });
-                                    }
-                                    localStorage.setItem("gratefulMemories", JSON.stringify(current));
-                                    setGratefulEntries(prev => ({...prev, [journalDate]: journalText}));
-                                    alert("⭐ Marked as Grateful Memory!");
-                                }} style={{ marginTop: "10px", padding: "8px 12px", background: "#ffd54f", color: "#000", fontWeight: "bold", border: "none", borderRadius: "6px", cursor: "pointer" }}> ⭐ Mark as Grateful Memory </button>
-                            </>
-                        )}
-                        <button onClick={() => { setIsZenMode(false); const iframe = moodRef.current; if (iframe && iframe.contentWindow) { iframe.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*'); } }} style={{ position: "absolute", top: "20px", right: "20px", padding: "10px 16px" }}> Exit Zen Mode </button>
-                    </div>
-                </div>
-            )}
-            {isSacredEarthMode && (
-                <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "#000", zIndex: 10000, color: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                    <iframe src={sacredEarthVideos[sacredEarthTribe]} title="Sacred Earth Background" frameBorder="0" allow="autoplay" style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", zIndex: -1 }}></iframe>
-                    <button onClick={() => { setSacredEarthTribe(""); setIsSacredEarthMode(false); }} style={{ position: "fixed", bottom: "20px", right: "20px", padding: "12px 24px", fontSize: "16px", background: "#fff", color: "#000", border: "none", borderRadius: "8px", cursor: "pointer", zIndex: 10001 }}> Exit Sacred Earth Mode </button>
-                </div>
-            )}
-        </div>
-    );
+            {/* --- NEW LOGOUT BUTTON --- */}
+            <button onClick={handleLogout} style={{...styles.navButton, marginTop: 'auto', background: 'rgba(217, 83, 79, 0.3)'}}>
+              Logout
+            </button>
+
+          </div>
+        )}
+        {/* Main Content Area */}
+        {!isAnyModeActive && (
+          <div style={{...styles.mainContent, alignItems: 'normal', justifyContent: 'normal'}}>
+            {activeView === 'home' && <HomeView />}
+            {activeView === 'digest' && <DailyDigestView />}
+          </div>
+        )}
+
+        {/* Full-screen modes (Meditation, Zen, Sacred Earth) */}
+        {isMeditating && (
+  <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "#000", display: "flex", zIndex: 10000 }}>
+    <div style={{ flex: 3, display: "flex", justifyContent: "center", alignItems: "center", padding: '1rem' }}>
+      <iframe id="meditationVideo" width="100%" height="100%" src={meditationStyles[selectedMeditationIndex].url} title={meditationStyles[selectedMeditationIndex].title} frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen></iframe>
+    </div>
+    <div id="meditationList" style={{ flex: 1, background: "#111", color: "#fff", padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "10px" }}>
+      <h3>Select Meditation</h3>
+      {meditationStyles.map((video, index) => (
+        <button key={video.title} onClick={() => setSelectedMeditationIndex(index)} style={{ padding: "10px", background: selectedMeditationIndex === index ? "#333" : "#222", color: "#fff", border: "none", borderRadius: "6px", textAlign: "left", cursor: "pointer" }}>{video.title}</button>
+      ))}
+    </div>
+    <button onClick={() => setIsMeditating(false)} style={{ position: "absolute", bottom: "20px", right: "20px", padding: "12px 24px", fontSize: "16px", background: "#fff", color: "#000", border: "none", borderRadius: "8px", cursor: "pointer", zIndex: 10001 }}> Exit Meditation </button>
+  </div>
+)}
+        {isZenMode && (
+  <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "#111", color: "#fff", zIndex: 9999, display: "flex", flexDirection: window.innerWidth < 768 ? "column" : "row", overflowY: "auto" }}>
+      <div style={{ position: "absolute", top: "10px", width: "100%", textAlign: "center", fontSize: "18px", opacity: promptFade ? 1 : 0, transition: "opacity 0.5s", color: "#ccc", zIndex: 10000 }}>{zenPrompts[promptIndex]}</div>
+      <div style={{ width: window.innerWidth < 768 ? '100%' : "30%", background: "#1a1a1a", padding: "20px", overflowY: "auto", borderRight: "1px solid #333" }}>
+          <h2 style={{ marginTop: 0 }}>  📘  Journal History</h2>
+          {Object.entries(allJournals).sort(([a], [b]) => b.localeCompare(a)).map(([date, entry]) => {
+              const isGrateful = gratefulEntries[date]?.trim() === entry.trim();
+              return (
+                  <div key={date} onClick={() => setJournalDate(date)} style={{ padding: "10px", marginBottom: "10px", background: journalDate === date ? "#333" : "#222", borderRadius: "5px", cursor: "pointer" }}>
+                      <strong>{new Date(date).toDateString()}</strong>
+                      <p style={{ fontSize: "12px", color: "#ccc" }}>{entry.slice(0, 60)}{entry.length > 60 ? "..." : ""}</p>
+                      <button onClick={(e) => {
+                          e.stopPropagation();
+                          let current = JSON.parse(localStorage.getItem("gratefulMemories") || "[]");
+                          const index = current.findIndex(m => m.date === date && m.content === entry);
+                          if (index !== -1) {
+                              current.splice(index, 1);
+                              alert(" ❌  Removed from Grateful Memories");
+                          } else {
+                              current.push({ date, content: entry });
+                              alert(" ⭐  Marked as Grateful Memory!");
+                          }
+                          localStorage.setItem("gratefulMemories", JSON.stringify(current));
+                          const updated = {};
+                          current.forEach(m => { updated[m.date] = m.content; });
+                          setGratefulEntries(updated);
+                      }}> {isGrateful ? " ❌  Unmark Grateful" : " 💖  Mark as Grateful"} </button>
+                  </div>
+              );
+          })}
+      </div>
+      <div style={{ flex: 1, padding: "30px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start" }}>
+          <h1>  🧘  Zen Mode</h1>
+          <input type="date" value={journalDate} onChange={(e) => setJournalDate(e.target.value)} style={{ marginBottom: "20px", fontSize: "16px", padding: "6px", borderRadius: "4px", border: "1px solid #666", background: "#222", color: "#fff" }} />
+          <iframe width="0" height="0" src="https://www.youtube.com/embed/EK7tN-LVgxo?autoplay=1&loop=1&playlist=EK7tN-LVgxo" title="Zen Music" allow="autoplay" style={{ display: "none" }}></iframe>
+          <button onClick={() => setViewingGrateful(!viewingGrateful)} style={{ marginBottom: "16px", padding: "10px 16px", background: viewingGrateful ? "#ffe0b2" : "#dcedc8", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold", fontSize: "15px" }}>
+              {viewingGrateful ? "← Back to Journal" : " 💖  View Grateful Memories"}
+          </button>
+          {viewingGrateful ? (
+              <div style={{ background: "#fff8e1", padding: "20px", borderRadius: "10px", color: "#333", fontSize: "16px", height: "60vh", overflowY: "auto", width: '100%' }}>
+                  <h3 style={{ color: "#c62828", marginBottom: "10px" }}>  💖  Your Grateful Memories</h3>
+                  {Object.keys(gratefulEntries).length === 0 ? (<p>No grateful memories saved yet.</p>) : (Object.entries(gratefulEntries).filter(([_, text]) => text && text.trim()).map(([date, text]) => (
+                      <div key={date} style={{ background: "#fff", marginBottom: "10px", padding: "10px", borderRadius: "6px", boxShadow: "0 2px 4px rgba(0,0,0,0.1)" }}>
+                          <strong>{date}</strong>
+                          <p style={{ margin: "5px 0" }}>{text}</p>
+                      </div>
+                  )))}
+                  <button onClick={() => {
+                      const content = Object.entries(gratefulEntries).filter(([_, text]) => text && text.trim()).map(([date, text]) => `${date}\n${text}\n\n`).join("");
+                      const blob = new Blob([content], { type: "text/plain" });
+                      const url = URL.createObjectURL(blob);
+                      const link = document.createElement("a");
+                      link.href = url;
+                      link.download = "Grateful_Memories.txt";
+                      link.click();
+                      URL.revokeObjectURL(url);
+                  }} style={{ marginTop: "10px", padding: "10px 16px", background: "#aed581", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}>  📥  Download as .txt </button>
+              </div>
+          ) : (
+              <>
+                  <textarea placeholder="Let your thoughts flow here..." value={journalText} onChange={(e) => setJournalText(e.target.value)}
+                      style={{ width: "100%", height: "60vh", padding: "20px", fontSize: "16px", background: "#222", color: "#fff", border: "none", borderRadius: "8px", resize: "none" }}
+                  />
+                  <button onClick={() => {
+                      if (!journalText || !journalText.trim()) {
+                          alert("Cannot mark an empty entry as grateful.");
+                          return;
+                      }
+                      let current = JSON.parse(localStorage.getItem("gratefulMemories") || "[]");
+                      const index = current.findIndex(m => m.date === journalDate);
+                      if (index !== -1) {
+                          current[index].content = journalText;
+                      } else {
+                          current.push({ date: journalDate, content: journalText });
+                      }
+                      localStorage.setItem("gratefulMemories", JSON.stringify(current));
+                      setGratefulEntries(prev => ({ ...prev, [journalDate]: journalText }));
+                      alert(" ⭐  Marked as Grateful Memory!");
+                  }} style={{ marginTop: "10px", padding: "8px 12px", background: "#ffd54f", color: "#000", fontWeight: "bold", border: "none", borderRadius: "6px", cursor: "pointer" }}>  ⭐  Mark as Grateful Memory </button>
+              </>
+          )}
+          <button onClick={() => { setIsZenMode(false); const iframe = moodRef.current; if (iframe && iframe.contentWindow) { iframe.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*'); } }} style={{ position: "absolute", top: "20px", right: "20px", padding: "10px 16px" }}> Exit Zen Mode </button>
+      </div>
+  </div>
+)}
+        {isSacredEarthMode && (
+  <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "#000", zIndex: 10000, color: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+    <iframe src={sacredEarthVideos[sacredEarthTribe]} title="Sacred Earth Background" frameBorder="0" allow="autoplay" style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", zIndex: -1 }}></iframe>
+    <button onClick={() => { setSacredEarthTribe(""); setIsSacredEarthMode(false); }} style={{ position: "fixed", bottom: "20px", right: "20px", padding: "12px 24px", fontSize: "16px", background: "#fff", color: "#000", border: "none", borderRadius: "8px", cursor: "pointer", zIndex: 10001 }}> Exit Sacred Earth Mode </button>
+  </div>
+)}
+      </>
+    )}
+  </div>
+);
+
 }
+    // A new component for our Login/Signup View
+const AuthView = ({
+  isLoginView,
+  setIsLoginView,
+  authEmail,
+  setAuthEmail,
+  authPassword,
+  setAuthPassword,
+  handleLogin,
+  handleSignup,
+}) => {
+  const formStyle = {
+    width: '100%',
+    maxWidth: '400px',
+    margin: 'auto',
+    padding: '2rem',
+    background: 'rgba(0, 0, 0, 0.7)',
+    backdropFilter: 'blur(10px)',
+    borderRadius: '12px',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+    color: 'white',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '1rem',
+  };
+  const inputStyle = {
+    padding: '0.75rem',
+    borderRadius: '8px',
+    border: '1px solid #555',
+    background: '#333',
+    color: 'white',
+    fontSize: '1rem',
+  };
+  const buttonStyle = {
+    padding: '0.75rem',
+    borderRadius: '8px',
+    border: 'none',
+    background: '#f5f5f5',
+    color: '#111',
+    fontSize: '1rem',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+  };
+  const toggleButtonStyle = {
+    background: 'none',
+    border: 'none',
+    color: 'lightblue',
+    textDecoration: 'underline',
+    cursor: 'pointer',
+    marginTop: '0.5rem',
+  };
+
+  return (
+    <div style={formStyle}>
+      <h2>{isLoginView ? 'Login' : 'Sign Up'}</h2>
+      <input
+        type="email"
+        placeholder="Email"
+        value={authEmail}
+        onChange={(e) => setAuthEmail(e.target.value)}
+        style={inputStyle}
+      />
+      <input
+        type="password"
+        placeholder="Password"
+        value={authPassword}
+        onChange={(e) => setAuthPassword(e.target.value)}
+        style={inputStyle}
+      />
+      <button onClick={isLoginView ? handleLogin : handleSignup} style={buttonStyle}>
+        {isLoginView ? 'Login' : 'Sign Up'}
+      </button>
+      <button onClick={() => setIsLoginView(!isLoginView)} style={toggleButtonStyle}>
+        {isLoginView ? 'Need an account? Sign Up' : 'Already have an account? Login'}
+      </button>
+    </div>
+  );
+};
