@@ -2,6 +2,14 @@
 import { useState, useEffect, useRef } from "react";
 // Add this new block:
 import { auth, db } from "./firebase"; // Import from our new firebase.js file
+// Add these new imports
+import {
+  collection,
+  doc,
+  onSnapshot,
+  setDoc,
+  updateDoc
+} from "firebase/firestore";
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
@@ -172,6 +180,39 @@ useEffect(() => {
   // Cleanup subscription on unmount
   return () => unsubscribe();
 }, []);
+
+// Add this new effect to sync the journal
+useEffect(() => {
+  // If there's no user, do nothing.
+  if (!user) {
+    setAllJournals({});
+    return;
+  }
+
+  // Get a reference to this user's "journals" sub-collection
+  const journalsColRef = collection(db, "users", user.uid, "journals");
+
+  // onSnapshot listens for real-time updates
+  const unsubscribe = onSnapshot(journalsColRef, (snapshot) => {
+    const journalsData = {};
+    snapshot.forEach((doc) => {
+      journalsData[doc.id] = doc.data(); // Store the whole journal object (text, reflection, etc.)
+    });
+    setAllJournals(journalsData);
+  });
+
+  // Cleanup listener on unmount or when user logs out
+  return () => unsubscribe();
+
+}, [user]); // This effect re-runs whenever the user object changes
+// Add this new effect to load the correct journal text into the editor
+useEffect(() => {
+  // When the selected date or the synced journals data changes,
+  // find the text for the current date.
+  // If no entry exists for that date, default to an empty string.
+  const currentEntryText = allJournals[journalDate]?.text || '';
+  setJournalText(currentEntryText);
+}, [journalDate, allJournals]); // This runs when you pick a date or when data syncs
     
     // Effect to control background video play/pause state
     useEffect(() => {
@@ -209,38 +250,29 @@ useEffect(() => {
         return () => clearInterval(interval);
     }, [currentQuotes]);
 
-    useEffect(() => {
-        if (isZenMode) {
-            const journals = {};
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key.startsWith("journal-")) {
-                    const date = key.replace("journal-", "");
-                    journals[date] = localStorage.getItem(key);
-                }
-            }
-            setAllJournals(journals);
-            const todayEntry = localStorage.getItem(`journal-${journalDate}`);
-            setJournalText(todayEntry || "");
-            const storedMemories = JSON.parse(localStorage.getItem("gratefulMemories") || "[]");
-            const memoriesObject = {};
-            for (let memory of storedMemories) {
-                memoriesObject[memory.date] = memory.content;
-            }
-            setGratefulEntries(memoriesObject);
-        }
-    }, [isZenMode, journalDate]);
+    // Replace the old journal saving logic with this
+useEffect(() => {
+  // Only run if a user is logged in AND is in Zen Mode
+  if (user && isZenMode) {
+    const saveJournal = async () => {
+      const journalDocRef = doc(db, "users", user.uid, "journals", journalDate);
+      try {
+        // Using setDoc with { merge: true } creates/updates the doc without overwriting other fields
+        await setDoc(journalDocRef, { text: journalText }, { merge: true });
+      } catch (error) {
+        console.error("Failed to save journal:", error);
+        alert("Error: Could not save journal to the cloud.");
+      }
+    };
 
-    useEffect(() => {
-        if (isZenMode) {
-            const key = `journal-${journalDate}`;
-            const timeout = setTimeout(() => {
-                localStorage.setItem(key, journalText);
-                setAllJournals(prev => ({ ...prev, [journalDate]: journalText }));
-            }, 1000);
-            return () => clearTimeout(timeout);
-        }
-    }, [journalText, journalDate, isZenMode]);
+    // Wait 1 second after user stops typing to save
+    const timeout = setTimeout(() => {
+      saveJournal();
+    }, 1000);
+
+    return () => clearTimeout(timeout);
+  }
+}, [journalText, journalDate, user, isZenMode]);
 
     useEffect(() => {
         const handleFirstClick = () => {
@@ -272,6 +304,41 @@ const handleLogin = async () => {
 
 const handleLogout = () => {
   signOut(auth);
+};
+const handleGetReflection = async () => {
+  if (!journalText) {
+    alert("Please write a journal entry before getting a reflection.");
+    return;
+  }
+
+  // --- PASTE YOUR ACTUAL WORKER URL HERE ---
+  const workerUrl = "https://calm-heart-21e5.dedipyapaul1999.workers.dev"; 
+
+  try {
+    const response = await fetch(workerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: journalText }) // Your worker expects a 'prompt' field
+    });
+
+    if (!response.ok) throw new Error(`AI worker failed: ${response.statusText}`);
+
+    const aiData = await response.json();
+    const reflection = aiData.response; // The AI text is in the 'response' property
+
+    if (!reflection) {
+        alert("The AI returned an empty reflection. Please try again.");
+        return;
+    }
+
+    // Save the reflection to Firestore
+    const journalDocRef = doc(db, "users", user.uid, "journals", journalDate);
+    await updateDoc(journalDocRef, { reflection: reflection });
+
+  } catch (error) {
+    console.error("Failed to get AI reflection:", error);
+    alert("Sorry, the AI Reflection Coach is unavailable right now.");
+  }
 };
 
     const handleSubscribe = async () => {
@@ -476,27 +543,27 @@ const handleLogout = () => {
       <div style={{ width: window.innerWidth < 768 ? '100%' : "30%", background: "#1a1a1a", padding: "20px", overflowY: "auto", borderRight: "1px solid #333" }}>
           <h2 style={{ marginTop: 0 }}>  📘  Journal History</h2>
           {Object.entries(allJournals).sort(([a], [b]) => b.localeCompare(a)).map(([date, entry]) => {
-              const isGrateful = gratefulEntries[date]?.trim() === entry.trim();
+              const isGrateful = gratefulEntries[date]?.trim() === entry.text?.trim();
               return (
                   <div key={date} onClick={() => setJournalDate(date)} style={{ padding: "10px", marginBottom: "10px", background: journalDate === date ? "#333" : "#222", borderRadius: "5px", cursor: "pointer" }}>
                       <strong>{new Date(date).toDateString()}</strong>
-                      <p style={{ fontSize: "12px", color: "#ccc" }}>{entry.slice(0, 60)}{entry.length > 60 ? "..." : ""}</p>
+                      <p style={{ fontSize: "12px", color: "#ccc" }}>{entry.text.slice(0, 60)}{entry.text.length > 60 ? "..." : ""}</p>
                       <button onClick={(e) => {
-                          e.stopPropagation();
-                          let current = JSON.parse(localStorage.getItem("gratefulMemories") || "[]");
-                          const index = current.findIndex(m => m.date === date && m.content === entry);
-                          if (index !== -1) {
-                              current.splice(index, 1);
-                              alert(" ❌  Removed from Grateful Memories");
-                          } else {
-                              current.push({ date, content: entry });
-                              alert(" ⭐  Marked as Grateful Memory!");
-                          }
-                          localStorage.setItem("gratefulMemories", JSON.stringify(current));
-                          const updated = {};
-                          current.forEach(m => { updated[m.date] = m.content; });
-                          setGratefulEntries(updated);
-                      }}> {isGrateful ? " ❌  Unmark Grateful" : " 💖  Mark as Grateful"} </button>
+    e.stopPropagation();
+    let current = JSON.parse(localStorage.getItem("gratefulMemories") || "[]");
+    const index = current.findIndex(m => m.date === date && m.content === entry);
+    if (index !== -1) {
+        current.splice(index, 1);
+        alert("  ❌   Removed from Grateful Memories");
+    } else {
+        current.push({ date, content: entry });
+        alert("  ⭐   Marked as Grateful Memory!");
+    }
+    localStorage.setItem("gratefulMemories", JSON.stringify(current));
+    const updated = {};
+    current.forEach(m => { updated[m.date] = m.content; });
+    setGratefulEntries(updated);
+}}> {isGrateful ? " ❌  Unmark Grateful" : " 💖  Mark as Grateful"} </button>
                   </div>
               );
           })}
@@ -551,6 +618,29 @@ const handleLogout = () => {
                   }} style={{ marginTop: "10px", padding: "8px 12px", background: "#ffd54f", color: "#000", fontWeight: "bold", border: "none", borderRadius: "6px", cursor: "pointer" }}>  ⭐  Mark as Grateful Memory </button>
               </>
           )}
+          {/* --- AI REFLECTION COACH UI --- */}
+<div style={{width: '100%', marginTop: '1.5rem'}}>
+  <button 
+    onClick={handleGetReflection} 
+    disabled={allJournals[journalDate]?.reflection} // Disable button if reflection exists
+    style={{
+      ...styles.navButton, 
+      width: 'auto', 
+      textAlign: 'center',
+      background: 'rgba(142, 68, 173, 0.8)',
+      cursor: allJournals[journalDate]?.reflection ? 'not-allowed' : 'pointer'
+    }}
+  >
+    {allJournals[journalDate]?.reflection ? 'Reflection Generated' : '✨ Get AI Reflection'}
+  </button>
+
+  {allJournals[journalDate]?.reflection && (
+    <div style={{...styles.card, background: 'rgba(255, 255, 255, 0.1)', marginTop: '1rem', textAlign: 'left'}}>
+      <h4 style={{marginTop: 0, color: '#f1c40f'}}>Reflection Coach says:</h4>
+      <p style={{whiteSpace: 'pre-wrap', lineHeight: '1.6'}}>{allJournals[journalDate].reflection}</p>
+    </div>
+  )}
+</div>
           <button onClick={() => { setIsZenMode(false); const iframe = moodRef.current; if (iframe && iframe.contentWindow) { iframe.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*'); } }} style={{ position: "absolute", top: "20px", right: "20px", padding: "10px 16px" }}> Exit Zen Mode </button>
       </div>
   </div>
